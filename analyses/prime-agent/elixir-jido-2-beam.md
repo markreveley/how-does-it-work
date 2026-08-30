@@ -421,6 +421,116 @@ has budgets for:
 OTP supervisors restart failures; they do not enforce business budgets. Resource
 limits must remain explicit domain policy.
 
+## Follow-up: Rust execution runtime and NIF boundary
+
+Rust can strengthen the hybrid, but the execution runtime should not itself be a
+large NIF. The useful distinction is between a native library and an autonomous
+runtime.
+
+Small Rustler NIFs are a good fit for deterministic, bounded operations such as
+binary protocol parsing, hashing, compression, tokenization, diff parsing, and
+search-index primitives. They avoid a process round trip and can operate
+efficiently on BEAM binaries. Rustler improves memory and type safety over a
+handwritten C NIF and catches Rust panics at the boundary, but it does not turn
+native code into an isolated service.
+
+NIF code executes inside the BEAM OS process. Memory corruption in unsafe code
+or a native dependency, an abort, runaway allocation, deadlock, or indefinitely
+blocking work can therefore damage or stop the entire node. Ordinary NIFs must
+return quickly. Dirty schedulers accommodate bounded CPU- or I/O-heavy calls but
+do not introduce an OS failure boundary; cancellation of an already-running
+dirty NIF is cooperative, and saturating a dirty scheduler pool can still harm
+the node. Native worker threads behind a NIF keep ordinary schedulers responsive,
+but their state and lifetime remain outside normal OTP supervision.
+
+Consequently, agent loops, model streams, persistent interpreters, PTYs, process
+trees, large filesystem walks, and untrusted execution belong in a Rust port or
+sidecar. That worker can be restarted and versioned independently, and a crash
+does not share memory with the BEAM. It should use a framed protocol with stable
+command IDs, deadlines, cancellation, output bounds, and capability-scoped
+workspace access. Large values should cross the boundary as artifact handles or
+content hashes rather than repeated byte copies.
+
+```mermaid
+flowchart LR
+    subgraph BEAM["BEAM / Jido control plane"]
+      J["AgentServer and Pods"] --> D["Policy, durable state, scheduling"]
+      J --> N["Small Rustler NIFs\nbounded pure operations"]
+      J <--> G["Execution gateway"]
+    end
+
+    G <-->|"Port or framed local RPC"| R["Rust execution sidecar\nprocess groups, PTYs, artifacts, quotas"]
+    R <--> P["Persistent Python kernel\noptional model-written computation"]
+    R --> S["Shell and project tools"]
+    R --- O["OS or container sandbox"]
+```
+
+Rust can replace Prime's Python-side process-management infrastructure, but it
+does not necessarily replace Python's role in the RLM. Python remains a useful
+language for model-written computation, persistent variables, data manipulation,
+and access to its scientific and automation ecosystem. Removing it in favor of
+fixed Rust capabilities would produce a more constrained and predictable agent,
+but it would no longer preserve Prime Agent's most distinctive abstraction. A
+Rust worker may instead own and supervise Python, or host a capability-oriented
+Wasm or scripting runtime when stronger constraints are worth the reduced
+expressivity.
+
+The resulting ownership should remain strict:
+
+- Jido/OTP owns decisions, agent state, event history, child topology, budgets,
+  policy, retries, telemetry, and client fan-out.
+- Rust owns execution infrastructure: processes, PTYs, filesystem mediation,
+  artifacts, protocol enforcement, resource accounting, and sandbox lifecycle.
+- Python owns open-ended model-authored computation when the RLM behavior is
+  required.
+- The OS, container, or capability sandbox owns security isolation; neither Rust
+  nor BEAM process isolation supplies it by itself.
+
+### Would this materially outperform Prime Agent?
+
+In some domains, probably; across all domains, no. This is an architectural
+projection rather than a benchmark. It raises the operational ceiling of a
+hosted system, but adds two runtime boundaries to a product that Prime currently
+implements coherently in TypeScript and Python.
+
+| Domain | Likely winner | Reason |
+|---|---|---|
+| Many concurrent or mostly idle agents | Jido hybrid | Lightweight processes, supervision, registries, timers, and routing |
+| Long-lived hosted sessions | Jido hybrid | Clearer lifecycle, admission, recovery, and observability |
+| PTYs, process trees, artifact indexing, bounded streams | Rust execution worker | Strong fit for explicit ownership, concurrency, and binary processing |
+| Policy, quotas, and auditability | Jido hybrid | Typed effects provide a central authorization boundary |
+| Single-agent task quality | Roughly equal | Model, prompts, context management, tools, and RLM behavior dominate |
+| Ordinary LLM response latency | Roughly equal | Provider inference, network calls, and tool execution dominate runtime dispatch |
+| Local startup, packaging, and debugging | Prime Agent | Two languages and fewer cross-runtime protocols |
+| Dynamic model-written computation | Prime or the hybrid's Python layer | Python remains the more expressive programmable scratchpad |
+| Near-term feature velocity | Prime Agent | It already contains mature behavior and failure handling |
+| Hosted efficiency at sufficient scale | Jido hybrid, potentially | Coordination can be shared and execution workers independently placed |
+| Security | Neither by default | The comparison changes only when actual sandboxing is added |
+
+The hybrid would most clearly outperform when coordinating hundreds or thousands
+of intermittently active agents. It could host their logical state, streams,
+timers, and relationships without assigning an OS worker to each coordinator.
+Rust could improve execution-plane throughput and tail behavior for process and
+artifact workloads. These gains concern density, failure recovery, resource
+governance, and host efficiency more than how quickly one agent answers: model
+inference and external tools usually dominate a turn.
+
+For a local single-user CLI, the hybrid could be worse overall. It adds startup
+work, deployment components, protocol evolution, cross-language tracing, and
+more difficult contributor onboarding. It could also regress Prime's per-root
+failure isolation if all sessions share one BEAM node. A hosted design should
+therefore use several bounded BEAM nodes or containers and isolate Rust/Python
+workers per workspace or small workspace group rather than creating one enormous
+failure domain.
+
+The overall judgment is conditional: Prime Agent has the better
+simplicity-to-capability ratio for a local product, while the Jido/Rust/Python
+design has the higher operational ceiling for a hosted multi-agent platform. An
+immature three-runtime rewrite would likely underperform Prime for some time.
+The hybrid becomes better overall only once concurrency, tenancy, recovery,
+governance, or infrastructure density are important enough to repay that
+complexity.
+
 ## Comparative verdict
 
 | Dimension | Likely result of a careful Jido/BEAM design |
@@ -479,4 +589,9 @@ failure behavior, the BEAM rewrite has optimized the smaller half of the system.
 - [OTP design principles](https://www.erlang.org/doc/system/design_principles.html)
 - [Erlang process and signal semantics](https://www.erlang.org/doc/system/ref_man_processes.html)
 - [Distributed Erlang](https://www.erlang.org/docs/27/system/distributed.html)
+- [Erlang NIF API and dirty scheduler guidance](https://www.erlang.org/doc/apps/erts/erl_nif.html)
+- [Erlang NIF tutorial](https://www.erlang.org/docs/26/tutorial/nif.html)
+- [Debugging NIFs and port drivers](https://www.erlang.org/docs/26/tutorial/debugging.html)
+- [Rustler](https://github.com/rusterlium/rustler)
+- [Erlang external ports](https://www.erlang.org/doc/system/c_port.html)
 - [Prime Agent architecture analysis](architecture.md)
