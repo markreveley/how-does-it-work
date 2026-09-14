@@ -2,8 +2,9 @@
 
 Implementation-first notes on technologies worth understanding.
 
-Each analysis is pinned to a source revision and separates the project's claims
-from what the code actually does. The goal is not to reproduce product
+Implementation analyses are pinned to a source revision; protocol explainers
+identify their standards and implementation references. Each separates claims
+from the mechanisms that support them. The goal is not to reproduce product
 documentation, but to explain the mechanism, identify the important design
 choices, and make the risks and adoption tradeoffs legible.
 
@@ -12,6 +13,7 @@ choices, and make the risks and adoption tradeoffs legible.
 | Technology | Category | Analysis |
 |---|---|---|
 | Prime Agent | Long-running coding-agent harness | [Analysis index](analyses/prime-agent/README.md) |
+| SSH | Host identity, digital signatures, and fingerprints | [Explanation series](analyses/ssh/README.md) |
 
 ## Method
 
