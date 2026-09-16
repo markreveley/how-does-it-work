@@ -14,6 +14,7 @@ choices, and make the risks and adoption tradeoffs legible.
 |---|---|---|
 | Prime Agent | Long-running coding-agent harness | [Analysis index](analyses/prime-agent/README.md) |
 | SSH | Host identity, digital signatures, and fingerprints | [Explanation series](analyses/ssh/README.md) |
+| Networking | History, protocols, and hands-on Linux networking | [Tutorial course](analyses/networking/README.md) |
 
 ## Method
 
